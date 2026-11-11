@@ -1,0 +1,159 @@
+# Steel Browser — nginx gateway (rendered at boot from this template by
+# entrypoint.sh, which substitutes __PUBLIC_PORT__ and __STEEL_API_KEY__).
+#
+# Why a gateway at all: upstream Steel Browser ships NO authentication of
+# any kind — no API key, no bearer token, no basic auth anywhere in its
+# code (verified by code search 2026-11-11: zero hits for STEEL_API_KEY
+# or any auth middleware; the README itself warns "Ports 3000 and 9223
+# have no authentication. Don't expose them to the public internet").
+# A public Steel instance is an open proxy: anyone who finds the URL can
+# open browser sessions, drive Chromium over CDP, and scrape through the
+# deployer's IP on the deployer's bill. The official Railway template
+# (steelbrowser, 357 deploys) ships exactly that unauthenticated setup
+# and its own page says only "consider adding authentication". This
+# gateway is the differentiation: every route except the platform health
+# check requires the generated STEEL_API_KEY.
+#
+# How the key is accepted (all five, because different clients can only
+# send it one way):
+# - Authorization: Bearer <key>   (SDKs and HTTP clients)
+# - x-api-key: <key>              (curl, scripts)
+# - steel-api-key: <key>          (steel-sdk style header, accepted just in case)
+# - ?apiKey=<key>                 (CDP WebSocket clients, which cannot send headers)
+# - cookie steel_api_key=<key>    (the browser UI — see below)
+#
+# The cookie is what makes the built-in UI work: the other API-key-locked
+# template on the marketplace (header/query only, 0 deploys) locks the UI
+# out of its own API, because the React app's fetch calls carry no key.
+# Here /login (open) validates the key once and stores it as a cookie,
+# after which /ui, the live session viewer, and the Swagger docs all work
+# in the browser. API clients never need the cookie.
+#
+# What stays open: GET /v1/health only (Railway's health check sends no
+# key; it returns {"status":"ok"} when Chromium is up, 503 while it is
+# still starting) and /login itself. Everything else — /v1/*, /ui/*,
+# /documentation, /devtools/*, / — returns 401 without a valid key.
+# The 401 body is a short HTML page linking to /login so a browser user
+# who lands on the domain unauthenticated sees what to do instead of a
+# bare error.
+#
+# /devtools/ is proxied to the internal CDP nginx (port 9223, upstream's
+# own server block, kept verbatim below) so the debugger URL Steel hands
+# back works through the gateway instead of pointing at a port Railway
+# never exposes publicly.
+#
+# client_max_body_size 100m: Steel's own bodyLimit is 100 MB (file
+# uploads, screenshots); nginx's 1 MB default would reject them.
+# Proxy timeouts of 86400s: browser sessions and CDP sockets live for
+# hours; the default 60s proxy timeout would kill them.
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log warn;
+
+    # --- API-key checks (key rendered in at boot; ${{secret(32)}} is alphanumeric) ---
+    map $http_authorization $auth_bearer {
+        default 0;
+        "Bearer __STEEL_API_KEY__" 1;
+    }
+    map $http_x_api_key $auth_xkey {
+        default 0;
+        "__STEEL_API_KEY__" 1;
+    }
+    map $http_steel_api_key $auth_skey {
+        default 0;
+        "__STEEL_API_KEY__" 1;
+    }
+    map $cookie_steel_api_key $auth_cookie {
+        default 0;
+        "__STEEL_API_KEY__" 1;
+    }
+    map $arg_apiKey $auth_query {
+        default 0;
+        "__STEEL_API_KEY__" 1;
+    }
+    map "$auth_bearer$auth_xkey$auth_skey$auth_cookie$auth_query" $authed {
+        default 0;
+        "~1" 1;
+    }
+
+    # --- Chrome DevTools Protocol, internal (upstream api/nginx.conf, verbatim) ---
+    server {
+        listen 9223;
+
+        location / {
+            proxy_pass http://127.0.0.1:9222;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $host;
+            gzip off;
+            proxy_set_header Accept-Encoding "";
+            proxy_read_timeout 86400;
+            proxy_send_timeout 86400;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            chunked_transfer_encoding on;
+        }
+    }
+
+    # --- Public gateway on Railway's injected port ---
+    server {
+        listen __PUBLIC_PORT__;
+        client_max_body_size 100m;
+
+        # Platform health check stays open (Railway sends no key).
+        location = /v1/health {
+            proxy_pass http://127.0.0.1:12731;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+        }
+
+        # Key login page stays open; it sets the cookie the UI needs.
+        location = /login {
+            alias /usr/share/steel-gateway/login.html;
+            default_type text/html;
+        }
+
+        # DevTools debugger through the gateway (auth-gated).
+        location /devtools/ {
+            if ($authed = 0) {
+                return 401 '<!DOCTYPE html><html><head><title>Steel Browser — locked</title></head><body><h1>Steel Browser is API-key locked</h1><p>Send your key as an <code>Authorization: Bearer</code>, <code>x-api-key</code>, or <code>?apiKey=</code> credential, or <a href="/login">log in with the key</a> to use the browser UI.</p></body></html>';
+            }
+            proxy_pass http://127.0.0.1:9223;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $host;
+            gzip off;
+            proxy_set_header Accept-Encoding "";
+            proxy_read_timeout 86400;
+            proxy_send_timeout 86400;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            chunked_transfer_encoding on;
+        }
+
+        location / {
+            if ($authed = 0) {
+                return 401 '<!DOCTYPE html><html><head><title>Steel Browser — locked</title></head><body><h1>Steel Browser is API-key locked</h1><p>Send your key as an <code>Authorization: Bearer</code>, <code>x-api-key</code>, or <code>?apiKey=</code> credential, or <a href="/login">log in with the key</a> to use the browser UI.</p></body></html>';
+            }
+            proxy_pass http://127.0.0.1:12731;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 86400;
+            proxy_send_timeout 86400;
+            proxy_buffering off;
+            proxy_request_buffering off;
+        }
+    }
+}

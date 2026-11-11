@@ -126,7 +126,11 @@ http {
             default_type text/html;
         }
 
-        # DevTools debugger through the gateway (auth-gated).
+        # DevTools debugger through the gateway (auth-gated). Host must
+        # be 127.0.0.1, not the public domain: Chrome's DevTools HTTP
+        # endpoint rejects requests whose Host is neither localhost nor
+        # an IP ("Host header is specified and is not an IP address or
+        # localhost"). The nested 9223 proxy forwards this Host onward.
         location /devtools/ {
             if ($authed = 0) {
                 return 401 '<!DOCTYPE html><html><head><title>Steel Browser — locked</title></head><body><h1>Steel Browser is API-key locked</h1><p>Send your key as an <code>Authorization: Bearer</code>, <code>x-api-key</code>, or <code>?apiKey=</code> credential, or <a href="/login">log in with the key</a> to use the browser UI.</p></body></html>';
@@ -135,7 +139,7 @@ http {
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
-            proxy_set_header Host $host;
+            proxy_set_header Host 127.0.0.1;
             gzip off;
             proxy_set_header Accept-Encoding "";
             proxy_read_timeout 86400;

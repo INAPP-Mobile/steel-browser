@@ -1,4 +1,4 @@
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/steel-browser?utm_campaign=steel-browser)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/steel-browser-1?utm_campaign=steel-browser)
 
 ![Steel Browser — live session viewer](https://raw.githubusercontent.com/INAPP-Mobile/steel-browser/main/assets/steel-ui.png)
 

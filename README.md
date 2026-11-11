@@ -1,6 +1,6 @@
 # Steel Browser
 
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/steel-browser?utm_campaign=steel-browser)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.com/deploy/steel-browser-1?utm_campaign=steel-browser)
 
 Steel Browser is the open-source browser API for AI agents and apps: a batteries-included headless Chromium behind a REST API, with sessions, scraping, screenshots, PDFs, and a raw Chrome DevTools Protocol WebSocket that Puppeteer and Playwright connect to directly. This template deploys it as a single service — **API-key locked on every route**, so the public URL is a private browser endpoint, not an open proxy.
 
